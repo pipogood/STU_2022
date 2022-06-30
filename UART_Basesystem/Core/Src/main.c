@@ -104,11 +104,11 @@ uint8_t Transmit[4] = {0};			// Transmit Buffer.
 uint8_t Receive[16] = {0};			// Receive Buffer	-> Receive 1 bytes by default. ,260 bytes are maximum all of case. (+1(Header)+1(n Station)+256(max Station)+1(Checksum)=259bytes)
 uint8_t keepACK[2] = {0};
 
-uint8_t RxComplete = 0;				// Interrupt each period buffer(Receive[nbyte]).
+uint8_t RxComplete = 0;			// Interrupt each period buffer(Receive[nbyte]).
 uint8_t endReceive = 0;				// Flag to reset after finished transmission of frame.
 uint8_t ACKFlag = 0;				// Received ACK flag.
 uint32_t timeStamp = 0;				// Optional.
-uint16_t HMEtimeStamp = 0;			// time stamp for transmit zero(theta) to base system.
+uint16_t HMEtimeStamp = 0;		// time stamp for transmit zero(theta) to base system.
 
 //I2C
 uint8_t NFREG_ON = 0x45;

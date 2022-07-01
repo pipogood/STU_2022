@@ -237,7 +237,7 @@ static void MX_SPI3_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-
+//Control
 void Trajectory(float qf,float vb);
 void Drivemotor(int PWM);
 uint64_t micros();
@@ -250,8 +250,11 @@ void Update(X_hat_t, P_hat_t, DegAbs, R_t, H_t);
 void CascadeController();
 void lowpass();
 void reset();
-void velo();
+void Diff_velo();
 void inverse_tran();
+void MoveToStation();
+void set_home();
+void Kalman_filter();
 //spi
 void AMT222getpos();
 uint8_t AMT222checkbit( uint8_t *H, uint8_t *L);
@@ -345,42 +348,19 @@ int main(void)
 	  switch(State){
 	  default:
 		  case Idle:
-			  stop = 0;
-			  if (micros() - timeset3 > dt*1000000){
+			  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
+
+			  if (micros() - timeset3 > dt*1000000){ //Reset Value while Idle
 				  lowpass();
-				  velo();
+				  Diff_velo();
 				  inverse_tran();
-				prediction(X_hat_t,P_t,F_t,Q_t);
-				Update(X_hat_t,P_hat_t,DegAbs,R_t,H_t);
-				kal_position = X_t[0][0];
-				kal_velocity = X_t[1][0];
-				kal_acceleration = X_t[2][0];
-				equal(X_hat_t,X_t,3,3);  //X_hat_t = X_t
-				equal(P_hat_t,P_t,3,3); //P_hat_t = P_t
+				  Kalman_filter();
 				  timeset3 = micros();
 			  }
 
-			  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
-			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
-			  if(setzero == 1){
-				  if (timeset2 < 1000000) {
-					  Drivemotor(-2500);
-					  ;}
-				  else if (timeset2 < 2000000) {
-					  Drivemotor(2500);
-					  ;}
-				  else{
-					  postotra = 0 -current_rad_wrap;
-					  rad_before = current_rad_wrap;
-					  Drivemotor(-2500);
-					  if(current_rad >= 0.3 && current_rad <= 0.4){
-						  Reached = 1;
-						  HMEtimeStamp = HAL_GetTick();
-						  setzero = 0;
-						  Drivemotor(0);
-					  }
-				  }
-				  timeset2 = micros();
+			  if(setzero == 1){ // Condition for Set home
+				  set_home();
 			  }
 
 			  if(nDestination != 0){
@@ -389,39 +369,12 @@ int main(void)
 			  else{
 				  update = 0;
 			  }
+
 			  if(update == 1){ //UART Update
-				  topOmega = 0;
-				  Drivemotor(0);
-				  if(firstcheck == 1){
-					  if(Destination[n] != 0){
-						  inputpos = Destination[n]/57.2957795;
-						  postotra = inputpos-current_rad_wrap;
-						  rad_before = current_rad_wrap;
-						  if(postotra >= 0){
-							  direct = 1;}
-						  else{
-							  postotra = postotra*-1;
-							  direct = 0;}
-						  State = Working;
-						  firstcheck = 0;
-						  update = 0;
-					  }
-				  }
-				  else{
-					  inputpos = Destination[n]/57.2957795;
-					  postotra = inputpos-current_rad_wrap;
-					  rad_before = current_rad_wrap;
-					  if(postotra >= 0){
-						  direct = 1;}
-					  else{
-						  postotra = postotra*-1;
-						  direct = 0;}
-					  State = Working;
-					  update = 0;
-				  }
+				  MoveToStation();
 			  }
 
-			  if(blue == 1){
+			  if(blue == 1){ // Blue Button Switch
 				  postotra = 3.14;
 				  limitOmega = 5;
 				  direct = 1;
@@ -436,23 +389,9 @@ int main(void)
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
 			if (micros() - timeset > dt*1000000) { //1000 Hz
 				lowpass();
-				velo();
+				Diff_velo();
+				Kalman_filter();
 				if(postotra > 0.2){
-					/*if(tuaall < tuastart){
-						postotra = inputpos-current_rad_wrap;
-						rad_before = current_rad_wrap;
-						if(direct == 1){
-							PIDout = 2200;}
-						else{
-							postotra = postotra*-1;
-							PIDout = -2200;}
-						velostart = kal_velocity;
-					}
-					else{
-					Trajectory(postotra,limitOmega);
-					CascadeController();
-					}*/
-
 					Trajectory(postotra,limitOmega);
 					//CascadeController();
 					if(PIDon == 1){
@@ -480,7 +419,7 @@ int main(void)
 					}
 				}
 				else{
-					if(tuaall < 0.1){ //short distant
+					if(tuaall < 0.1){ //short distant 5,10 degree
 						if(direct == 1){
 							PIDout = 2100;}
 						else{
@@ -496,17 +435,10 @@ int main(void)
 				}
 				Drivemotor(PIDout);
 				tuaall += dt;
-				prediction(X_hat_t,P_t,F_t,Q_t);
-				Update(X_hat_t,P_hat_t,DegAbs,R_t,H_t);
-				kal_position = X_t[0][0];
-				kal_velocity = X_t[1][0];
-				kal_acceleration = X_t[2][0];
-				equal(X_hat_t,X_t,3,3);  //X_hat_t = X_t
-				equal(P_hat_t,P_t,3,3); //P_hat_t = P_t
 				timeset = micros();
 			}
 
-			if(tuaall > tf && setzero == 0){
+			if(tuaall > tf && setzero == 0){ //End of working should do this condition
 				if(direct == 1){
 					if(deg > Destination[n]-0.1){
 						finish = 1;
@@ -535,8 +467,7 @@ int main(void)
 				}
 			}
 
-			if(tuaall > 10 && tuaall > tf){
-
+			if(tuaall > 10 && tuaall > tf){ //Condition when moving error
 				n++;
 				if(n < nDestination){
 					update = 1;}
@@ -566,6 +497,9 @@ int main(void)
 			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
 			if(B1State2[1] == GPIO_PIN_SET && B1State2[0] == GPIO_PIN_RESET){
+				reset();
+				nDestination = 0;
+				n = 0;
 				State = Idle;
 				setzero = 1;
 			}
@@ -1100,11 +1034,19 @@ void CascadeController()
 	prevError = error;
 	prevMeasurement = kal_velocity;
 }
+void Kalman_filter()
+{
+	prediction(X_hat_t,P_t,F_t,Q_t);
+	Update(X_hat_t,P_hat_t,DegAbs,R_t,H_t);
+	kal_position = X_t[0][0];
+	kal_velocity = X_t[1][0];
+	kal_acceleration = X_t[2][0];
+	equal(X_hat_t,X_t,3,3);  //X_hat_t = X_t
+	equal(P_hat_t,P_t,3,3); //P_hat_t = P_t
+}
 
 void reset()
 {
-	lowpass();
-	prevError = 0;
 	tuaall = 0;
 	setzero = 0;
 	Drivemotor(0);
@@ -1112,7 +1054,64 @@ void reset()
 	PIDout = 0;
 	ch_velo = 0;
 	finish = 0;
+	stop = 0;
+	tra_velo = 0;
 }
+
+void set_home()
+{
+	  if (timeset2 < 1000000) {
+		  Drivemotor(-2500);
+		  ;}
+	  else if (timeset2 < 2000000) {
+		  Drivemotor(2500);
+		  ;}
+	  else{
+		  postotra = 0 -current_rad_wrap;
+		  rad_before = current_rad_wrap;
+		  Drivemotor(-2500);
+		  if(current_rad >= 0.3 && current_rad <= 0.4){
+			  Reached = 1;
+			  HMEtimeStamp = HAL_GetTick();
+			  setzero = 0;
+			  Drivemotor(0);
+		  }
+	  }
+	  timeset2 = micros();
+}
+
+void MoveToStation()
+{
+	  topOmega = 0;
+	  if(firstcheck == 1){
+		  if(Destination[n] != 0){
+			  inputpos = Destination[n]/57.2957795;
+			  postotra = inputpos-current_rad_wrap;
+			  rad_before = current_rad_wrap;
+			  if(postotra >= 0){
+				  direct = 1;}
+			  else{
+				  postotra = postotra*-1;
+				  direct = 0;}
+			  State = Working;
+			  firstcheck = 0;
+			  update = 0;
+		  }
+	  }
+	  else{
+		  inputpos = Destination[n]/57.2957795;
+		  postotra = inputpos-current_rad_wrap;
+		  rad_before = current_rad_wrap;
+		  if(postotra >= 0){
+			  direct = 1;}
+		  else{
+			  postotra = postotra*-1;
+			  direct = 0;}
+		  State = Working;
+		  update = 0;
+	  }
+}
+
 void inverse_tran(){
 	x_n = tra_velo;
 	volt_inverse = (x_n - (0.9724*x_n_1) + (0.003346*x_n_2) - (0.0004612*y_n_1))/0.002703;
@@ -1120,13 +1119,8 @@ void inverse_tran(){
 	x_n_1 = x_n;
 	y_n_1 = volt_inverse;
 }
-void velo(){
-	//if(current_rad_wrap != prevPos){
+void Diff_velo(){
 	velo_diff =  (pos_lowpass - prevPos)/dt;
-	/*}
-	else{
-		velo_diff = velo_diff;
-	}*/
 	DegAbs[0][0] = velo_diff;
 	prevPos = pos_lowpass;
 }

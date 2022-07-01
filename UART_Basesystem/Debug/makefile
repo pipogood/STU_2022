@@ -60,8 +60,8 @@ all: main-build
 main-build: UARTs.elf secondary-outputs
 
 # Tool invocations
-UARTs.elf UARTs.map: $(OBJS) $(USER_OBJS) C:\git\PIPO_stu3\UART_Basesystem\STM32F411RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "UARTs.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\git\PIPO_stu3\UART_Basesystem\STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="UARTs.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+UARTs.elf UARTs.map: $(OBJS) $(USER_OBJS) C:\git\STU3_2022\STU_2022\UART_Basesystem\STM32F411RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "UARTs.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\git\STU3_2022\STU_2022\UART_Basesystem\STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="UARTs.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

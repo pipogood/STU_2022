@@ -36,7 +36,7 @@
 /* USER CODE BEGIN PD */
 //Parameter for Adjust
 #define dt 0.01
-#define Q 10000000
+#define Q 100000000
 #define R 500000000
 #define NFW_ADDR (0x23)<<1
 #define NFR_ADDR ((0x23)<<1)+1
@@ -62,14 +62,14 @@ DMA_HandleTypeDef hdma_usart2_tx;
 DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
-float velo_Kp = 3;
+float velo_Kp = 0;
 float velo_Ki = 0;
-float velo_Kd = 3.5;
-float pos_Kp = 7.07697250571067;
+float velo_Kd = 0;
+float pos_Kp = 4.07697250571067;
 float pos_Ki = 3.71617437483172;
 float pos_Kd = 0.25445435315971;
 uint8_t setzero = 1;
-float offset = 0.345;
+float offset = 1.565;
 /* ---------------------------- < Communications's VARIABLE > ------ */
 
 // ---------------------------- < State machine >
@@ -219,6 +219,10 @@ float velo_diff;
 float prevPos;
 float pos_lowpass;
 float prevposlowpass;
+
+float velo_diff2;
+float prevPos2;
+
 //Inverse tranfer
 float volt_inverse;
 float x_n;
@@ -335,13 +339,12 @@ int main(void)
   while (1)
   {
 	  static uint64_t timeset = 0;
-	  static uint64_t timeset2 = 0;
 	  static uint64_t timeset3 = 0;
 	  static uint64_t timeStamp = 0;
 	  static GPIO_PinState B1State2[2] = {0};
 	  B1State2[0]= HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
 
-	  if(AMTcomplete || micros()-timeStamp>dt*1000000){
+	  if(AMTcomplete || micros()-timeStamp>dt*1000){
 	  		 AMT222getpos(&rawPos);
 	  	  }
 
@@ -350,11 +353,10 @@ int main(void)
 		  case Idle:
 			  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
 			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
-
-			  if (micros() - timeset3 > dt*1000000){ //Reset Value while Idle
+			  stop = 0;
+			  if (micros() - timeset3 > dt*1000000){ //Read Value while Idle
 				  lowpass();
 				  Diff_velo();
-				  inverse_tran();
 				  Kalman_filter();
 				  timeset3 = micros();
 			  }
@@ -393,8 +395,9 @@ int main(void)
 				Kalman_filter();
 				if(postotra > 0.2){
 					Trajectory(postotra,limitOmega);
-					//CascadeController();
-					if(PIDon == 1){
+					inverse_tran();
+					CascadeController();
+					/*if(PIDon == 1){
 						inverse_tran();
 						CascadeController();
 					}
@@ -416,7 +419,7 @@ int main(void)
 						}
 						error = tra_velo - velo_diff;
 						prevError = error;
-					}
+					}*/
 				}
 				else{
 					if(tuaall < 0.1){ //short distant 5,10 degree
@@ -446,7 +449,7 @@ int main(void)
 				}
 				else
 				{
-					if(deg < Destination[n]+1.2){
+					if(deg < Destination[n]+0.7){
 						finish = 1;
 					}
 				}
@@ -467,7 +470,7 @@ int main(void)
 				}
 			}
 
-			if(tuaall > 10 && tuaall > tf){ //Condition when moving error
+			if(tuaall > 15 && tuaall > tf){ //Condition when moving error
 				n++;
 				if(n < nDestination){
 					update = 1;}
@@ -899,33 +902,39 @@ static void MX_GPIO_Init(void)
 //----------------------------------------------------------------< CONTROL >
 void CascadeController()
 {
-	if(tuaall < tb/2 && postotra > 0.1){
+	/*if(tuaall < tb/2 && postotra > 0.2){
 		pos_Kp = 3.07697250571067;
 		pos_Ki = 0.71617437483172;
 		pos_Kd = 0.25445435315971;
-		velo_Kp = 1.5;
+		velo_Kp = 0.5;
 		velo_Ki = 0;
 		velo_Kd = 0;
-		if(direct == 1){
-			ch_velo = velo_diff;
-			if(ch_velo > tra_velo){
-				velo_diff = tra_velo;
+		/*if(direct == 1){
+			if(kal_velocity > tra_velo){
+				kal_velocity = tra_velo;
 			}
 		}
 		else{
-			ch_velo = velo_diff;
-			if(ch_velo < tra_velo){
-				velo_diff = tra_velo;
+			if(kal_velocity < tra_velo){
+				kal_velocity = tra_velo;
 			}
 		}
+	}*/
+	if(start_tra == 2){
+		pos_Kp = 4.07697250571067;
+		pos_Ki = 3.71617437483172;
+		pos_Kd = 0.75445435315971;
+		velo_Kp = 1.5;
+		velo_Ki = 0;
+		velo_Kd = 0;
 	}
 	else{
-		pos_Kp = 7.07697250571067;
+		pos_Kp = 4.07697250571067;
 		pos_Ki = 3.71617437483172;
-		pos_Kd = 0.25445435315971;
-		velo_Kp = 2.5;
+		pos_Kd = 0.75445435315971;
+		velo_Kp = 1.5;
 		velo_Ki = 0;
-		velo_Kd = 0.5;
+		velo_Kd = 0;
 	}
 	//position control******
 	float error2 = tra_pos - current_rad_wrap; //setpoint - new_Data
@@ -952,7 +961,7 @@ void CascadeController()
 
 	//velocity control*******
 
-	/*if(direct == 1){
+	if(direct == 1){
 		ch_velo = kal_velocity;
 		if(ch_velo > limitOmega/9.5493){
 			kal_velocity = limitOmega/9.5493;
@@ -963,7 +972,7 @@ void CascadeController()
 		if(ch_velo > limitOmega/9.5493){
 			kal_velocity = (limitOmega/9.5493)*-1;
 		}
-	}*/
+	}
 
 	error = tra_velo+poscommand - kal_velocity; //setpoint+poscom - new_Data
 	float proportional = velo_Kp * error;
@@ -993,6 +1002,13 @@ void CascadeController()
 
 	//PIDout = PIDout*10000/12.0;
 	PIDout = (volt_inverse+volt_controller)*10000/12.0;
+	/*if(tuaall > tf){
+		if(direct == 1){
+			PIDout = 1200;}
+		else{
+			PIDout = -1200;
+		}
+	}*/
 	//****try****//
 	/*if(limitOmega > 4){
 		tuastart = 0;
@@ -1034,43 +1050,30 @@ void CascadeController()
 	prevError = error;
 	prevMeasurement = kal_velocity;
 }
-void Kalman_filter()
-{
-	prediction(X_hat_t,P_t,F_t,Q_t);
-	Update(X_hat_t,P_hat_t,DegAbs,R_t,H_t);
-	kal_position = X_t[0][0];
-	kal_velocity = X_t[1][0];
-	kal_acceleration = X_t[2][0];
-	equal(X_hat_t,X_t,3,3);  //X_hat_t = X_t
-	equal(P_hat_t,P_t,3,3); //P_hat_t = P_t
-}
 
 void reset()
 {
 	tuaall = 0;
-	setzero = 0;
 	Drivemotor(0);
 	PIDon = 0;
 	PIDout = 0;
-	ch_velo = 0;
 	finish = 0;
-	stop = 0;
-	tra_velo = 0;
 }
 
 void set_home()
 {
-	  if (timeset2 < 1000000) {
+	  static uint64_t timeset2 = 0;
+	  if (timeset2 < 500000) {
 		  Drivemotor(-2500);
 		  ;}
-	  else if (timeset2 < 2000000) {
+	  else if (timeset2 < 1500000) {
 		  Drivemotor(2500);
 		  ;}
 	  else{
-		  postotra = 0 -current_rad_wrap;
+		  postotra = 0 - current_rad_wrap;
 		  rad_before = current_rad_wrap;
 		  Drivemotor(-2500);
-		  if(current_rad >= 0.3 && current_rad <= 0.4){
+		  if(current_rad >= 1.55 && current_rad <= 1.6){
 			  Reached = 1;
 			  HMEtimeStamp = HAL_GetTick();
 			  setzero = 0;
@@ -1114,15 +1117,10 @@ void MoveToStation()
 
 void inverse_tran(){
 	x_n = tra_velo;
-	volt_inverse = (x_n - (0.9724*x_n_1) + (0.003346*x_n_2) - (0.0004612*y_n_1))/0.002703;
+	volt_inverse = (x_n - (0.9724*x_n_1) + (0.003346*x_n_2) - (0.0004612*y_n_1))/0.002803;
 	x_n_2 = x_n_1;
 	x_n_1 = x_n;
 	y_n_1 = volt_inverse;
-}
-void Diff_velo(){
-	velo_diff =  (pos_lowpass - prevPos)/dt;
-	DegAbs[0][0] = velo_diff;
-	prevPos = pos_lowpass;
 }
 void lowpass()
 {
@@ -1130,6 +1128,22 @@ void lowpass()
 	prevlowpass = kal_velocity;
 	pos_lowpass = 0.96906992*pos_lowpass + 0.01546504*current_rad_wrap + 0.01546504*prevposlowpass;
 	prevposlowpass = current_rad_wrap;
+}
+void Diff_velo(){
+	velo_diff =  (pos_lowpass - prevPos)/dt;
+	//velo_diff2 = (current_rad_wrap -  prevPos2)/dt;
+	DegAbs[0][0] = velo_diff;
+	prevPos = pos_lowpass;
+}
+void Kalman_filter()
+{
+	prediction(X_hat_t,P_t,F_t,Q_t);
+	Update(X_hat_t,P_hat_t,DegAbs,R_t,H_t);
+	kal_position = X_t[0][0];
+	kal_velocity = X_t[1][0];
+	kal_acceleration = X_t[2][0];
+	equal(X_hat_t,X_t,3,3);  //X_hat_t = X_t
+	equal(P_hat_t,P_t,3,3); //P_hat_t = P_t
 }
 void prediction(X_hat_t_1, P_t_1, F_t, Q_t)
 {
@@ -1231,9 +1245,9 @@ void equal(float A[][3],float B[][3],int row,int col)
 void Trajectory(float qf,float vb)
 {
 	vb = vb/9.5493;
-	float ab = 0.4;
+	float ab = 0.3;
 	if(qf < 0.1){
-		ab = 0.4;
+		ab = 0.3;
 		vb = 1.5/9.5493;
 	}
 	if(tuaall >= 0){
@@ -1244,7 +1258,6 @@ void Trajectory(float qf,float vb)
 
 		}
 		else{
-			ab = 0.4;
 			tb = sqrt(qf/ab);
 			vb_n = sqrt(qf*ab);
 		}
@@ -1269,7 +1282,7 @@ void Trajectory(float qf,float vb)
 			tra_pos = (0.5*ab*tb*tb) + (vb_n*(tua-(tf-tb))) + (vb_n*(tf-(2*tb))) - (0.5*ab*(tua-(tf-tb))*(tua-(tf-tb)));
 			tra_velo = vb_n - (ab*(tua-(tf-tb)));
 			tra_acc = -ab;
-			start_tra = 0;
+			start_tra = 2;
 		}
 		if(tua <= tf){
 			if(direct == 0){
@@ -1355,6 +1368,10 @@ void AMT222getpos(uint16_t *data){
 		    if(setzero == 0){
 		    current_rad = offset - current_rad;
 		    unwrapping();
+			if(current_rad_wrap-prevPos2 > 0.1 || current_rad_wrap-prevPos2 < -0.1){
+				current_rad_wrap = prevPos2;
+			}
+		    prevPos2 = current_rad_wrap;
 		    deg = current_rad_wrap*57.2957795;
 		    }
 			  /*if(current_rad <= 0){

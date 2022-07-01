@@ -68,7 +68,7 @@ float velo_Kd = 0;
 float pos_Kp = 4.07697250571067;
 float pos_Ki = 3.71617437483172;
 float pos_Kd = 0.25445435315971;
-uint8_t setzero = 1;
+uint8_t setinitial = 1;
 float offset = 1.565;
 /* ---------------------------- < Communications's VARIABLE > ------ */
 
@@ -147,6 +147,7 @@ float p_max = 2*PI; // �?ำหนดให้ค่า p_max อยู่ท�
 float e = 0.65*2*PI;
 
 //Parameter for coding
+uint8_t setzero = 0;
 uint64_t _micro = 0;
 uint8_t stop = 0;
 float kal_position = 0; //Collect Result
@@ -257,6 +258,7 @@ void reset();
 void Diff_velo();
 void inverse_tran();
 void MoveToStation();
+void set_initial();
 void set_home();
 void Kalman_filter();
 //spi
@@ -331,6 +333,8 @@ int main(void)
   //Encoder set
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET);
 
+  movingFlag = 14;
+
 
   /* USER CODE END 2 */
 
@@ -361,15 +365,12 @@ int main(void)
 				  timeset3 = micros();
 			  }
 
-			  if(setzero == 1){ // Condition for Set home
-				  set_home();
+			  if(setinitial == 1){ // Condition for first start
+				  set_initial();
 			  }
 
-			  if(nDestination != 0){
-				  update = 1;
-			  }
-			  else{
-				  update = 0;
+			  if(setzero == 1){ // Condition for Set home
+				  set_home();
 			  }
 
 			  if(update == 1){ //UART Update
@@ -484,10 +485,6 @@ int main(void)
 				}
 				State = Laser;
 				NFwriteFlag = 1;
-			}
-
-			if(velo_diff > topOmega){
-				topOmega = velo_diff*9.5493;
 			}
 
 			if(stop == 1){
@@ -1060,7 +1057,7 @@ void reset()
 	finish = 0;
 }
 
-void set_home()
+void set_initial()
 {
 	  static uint64_t timeset2 = 0;
 	  if (timeset2 < 500000) {
@@ -1070,49 +1067,67 @@ void set_home()
 		  Drivemotor(2500);
 		  ;}
 	  else{
-		  postotra = 0 - current_rad_wrap;
-		  rad_before = current_rad_wrap;
 		  Drivemotor(-2500);
 		  if(current_rad >= 1.55 && current_rad <= 1.6){
 			  Reached = 1;
 			  HMEtimeStamp = HAL_GetTick();
-			  setzero = 0;
+			  setinitial = 0;
 			  Drivemotor(0);
 		  }
 	  }
 	  timeset2 = micros();
 }
 
+void set_home()
+{
+	  Drivemotor(-2500);
+	  if(current_rad_wrap <= 0){
+		  Reached = 1;
+		  HMEtimeStamp = HAL_GetTick();
+		  setzero = 0;
+		  Drivemotor(0);
+	  }
+}
+
 void MoveToStation()
 {
-	  topOmega = 0;
-	  if(firstcheck == 1){
-		  if(Destination[n] != 0){
-			  inputpos = Destination[n]/57.2957795;
-			  postotra = inputpos-current_rad_wrap;
-			  rad_before = current_rad_wrap;
-			  if(postotra >= 0){
-				  direct = 1;}
-			  else{
-				  postotra = postotra*-1;
-				  direct = 0;}
-			  State = Working;
-			  firstcheck = 0;
-			  update = 0;
-		  }
-	  }
+//	  if(firstcheck == 1){
+//		  if(Destination[n] != 0){
+//			  inputpos = Destination[n]/57.2957795;
+//			  postotra = inputpos-current_rad_wrap;
+//			  rad_before = current_rad_wrap;
+//			  if(postotra >= 0){
+//				  direct = 1;}
+//			  else{
+//				  postotra = postotra*-1;
+//				  direct = 0;}
+//			  State = Working;
+//			  firstcheck = 0;
+//			  update = 0;
+//		  }
+//	  }
+//	  else{
+//		  inputpos = Destination[n]/57.2957795;
+//		  postotra = inputpos-current_rad_wrap;
+//		  rad_before = current_rad_wrap;
+//		  if(postotra >= 0){
+//			  direct = 1;}
+//		  else{
+//			  postotra = postotra*-1;
+//			  direct = 0;}
+//		  State = Working;
+//		  update = 0;
+//	  }
+	  inputpos = Destination[n]/57.2957795;
+	  postotra = inputpos-current_rad_wrap;
+	  rad_before = current_rad_wrap;
+	  if(postotra >= 0){
+		  direct = 1;}
 	  else{
-		  inputpos = Destination[n]/57.2957795;
-		  postotra = inputpos-current_rad_wrap;
-		  rad_before = current_rad_wrap;
-		  if(postotra >= 0){
-			  direct = 1;}
-		  else{
-			  postotra = postotra*-1;
-			  direct = 0;}
-		  State = Working;
-		  update = 0;
-	  }
+		  postotra = postotra*-1;
+		  direct = 0;}
+	  State = Working;
+	  update = 0;
 }
 
 void inverse_tran(){
@@ -1365,7 +1380,7 @@ void AMT222getpos(uint16_t *data){
 		    rawPos = AMTLbyte + ((AMTHbyte & 0b00111111)<<8);
 		     // Convert uint16 to angle variable.
 		    current_rad = (((rawPos)*2*PI)/(16384));
-		    if(setzero == 0){
+		    if(setinitial == 0){
 		    current_rad = offset - current_rad;
 		    unwrapping();
 			if(current_rad_wrap-prevPos2 > 0.1 || current_rad_wrap-prevPos2 < -0.1){
@@ -1373,6 +1388,9 @@ void AMT222getpos(uint16_t *data){
 			}
 		    prevPos2 = current_rad_wrap;
 		    deg = current_rad_wrap*57.2957795;
+		    }
+		    else{
+		    	prevPos2 = 0;
 		    }
 			  /*if(current_rad <= 0){
 				  current_rad = 6.28-(current_rad*-1);
@@ -1713,6 +1731,7 @@ void responseUART(){
 			break;
 		case 1:
 			HAL_UART_Transmit_DMA(&huart2, ACK1, 2);
+			update = 1;
 			movingFlag = 8;
 			TxState = 0;
 			//timeStamp = HAL_GetTick();								// Optional
@@ -1800,7 +1819,7 @@ void responseUART(){
 		case 2:
 			Transmit[0] = 0b10011011;								// Store byte to Transmit.
 			Transmit[1] = 0;
-			Transmit[2] = (topOmega*255)/(10);
+			Transmit[2] = (abs(kal_velocity)*255*9.5493)/(10);
 			// Transmit[2] = ((topOmega*255)/(10))
 			Transmit[3] = checkSum(frameSum(Transmit, 3));			// Let the last byte equal to checksum of 1st-3rd byte.
 			RxState = 3;
@@ -1856,7 +1875,7 @@ void responseUART(){
 		case 0:
 			break;
 		case 1:
-			//HAL_UART_Transmit_DMA(&huart2, ACK1, 2);
+			HAL_UART_Transmit_DMA(&huart2, ACK1, 2);
 			setzero = 1;
 			movingFlag = 14;
 			TxState = 0;
@@ -1910,7 +1929,7 @@ void destinationACK(){
 		  HAL_UART_Transmit_DMA(&huart2, ACK2, 2);
 		  break;
 	    case 14:
-	    	HAL_UART_Transmit_DMA(&huart2, ACK1, 2);
+//	    	HAL_UART_Transmit_DMA(&huart2, ACK1, 2);
 		  break;
 	    }
 	    movingFlag = 0;

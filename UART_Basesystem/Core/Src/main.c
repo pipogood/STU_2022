@@ -69,7 +69,7 @@ float pos_Kp = 4.07697250571067;
 float pos_Ki = 3.71617437483172;
 float pos_Kd = 0.25445435315971;
 uint8_t setinitial = 1;
-float offset = 1.565;
+float offset = 1.57;
 /* ---------------------------- < Communications's VARIABLE > ------ */
 
 // ---------------------------- < State machine >
@@ -109,6 +109,7 @@ uint8_t endReceive = 0;				// Flag to reset after finished transmission of frame
 uint8_t ACKFlag = 0;				// Received ACK flag.
 uint32_t timeStamp = 0;				// Optional.
 uint16_t HMEtimeStamp = 0;		// time stamp for transmit zero(theta) to base system.
+float send_velocity;
 
 //I2C
 uint8_t NFREG_ON = 0x45;
@@ -177,6 +178,7 @@ uint8_t PIDon = 0;
 float ch_velo;
 float finish = 0;
 float firstcheck = 1;
+float ch;
 
 //PID
 float limMin = -100;
@@ -357,7 +359,7 @@ int main(void)
 		  case Idle:
 			  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
 			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
-			  stop = 0;
+			  ch = 0;
 			  if (micros() - timeset3 > dt*1000000){ //Read Value while Idle
 				  lowpass();
 				  Diff_velo();
@@ -376,6 +378,11 @@ int main(void)
 			  if(update == 1){ //UART Update
 				  MoveToStation();
 			  }
+
+			  if(stop == 1){
+					State = Emerstop;
+					Drivemotor(0);
+				}
 
 			  if(blue == 1){ // Blue Button Switch
 				  postotra = 3.14;
@@ -431,9 +438,9 @@ int main(void)
 					}
 					else{
 						if(direct == 1){
-							PIDout = 1300;}
+							PIDout = 1000;}
 						else{
-							PIDout = -1300;}
+							PIDout = -1000;}
 					}
 					tf = 0;
 				}
@@ -450,7 +457,7 @@ int main(void)
 				}
 				else
 				{
-					if(deg < Destination[n]+0.7){
+					if(deg < Destination[n]+0.1){
 						finish = 1;
 					}
 				}
@@ -501,6 +508,7 @@ int main(void)
 				nDestination = 0;
 				n = 0;
 				State = Idle;
+				stop = 0;
 				setzero = 1;
 			}
 			B1State2[1] = B1State2[0];
@@ -918,17 +926,17 @@ void CascadeController()
 		}
 	}*/
 	if(start_tra == 2){
-		pos_Kp = 4.07697250571067;
+		pos_Kp = 7.07697250571067;
 		pos_Ki = 3.71617437483172;
-		pos_Kd = 0.75445435315971;
+		pos_Kd = 2.25445435315971;
 		velo_Kp = 1.5;
 		velo_Ki = 0;
 		velo_Kd = 0;
 	}
 	else{
-		pos_Kp = 4.07697250571067;
+		pos_Kp = 7.07697250571067;
 		pos_Ki = 3.71617437483172;
-		pos_Kd = 0.75445435315971;
+		pos_Kd = 2.2545435315971;
 		velo_Kp = 1.5;
 		velo_Ki = 0;
 		velo_Kd = 0;
@@ -1260,9 +1268,9 @@ void equal(float A[][3],float B[][3],int row,int col)
 void Trajectory(float qf,float vb)
 {
 	vb = vb/9.5493;
-	float ab = 0.3;
+	float ab = 0.225;
 	if(qf < 0.1){
-		ab = 0.3;
+		ab = 0.225;
 		vb = 1.5/9.5493;
 	}
 	if(tuaall >= 0){
@@ -1482,12 +1490,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 	if(GPIO_Pin == GPIO_PIN_8){
 		static GPIO_PinState B1State[2] = {0};
+		static GPIO_PinState B1Check;
 		B1State[0]= HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
+		B1Check = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
 		if(B1State[1] == GPIO_PIN_RESET && B1State[0] == GPIO_PIN_SET){
 			stop = 1;
 		}
 		B1State[1] = B1State[0];
-
+		if(B1Check == GPIO_PIN_SET){
+			ch++;
+		}
 
 	}
 }
@@ -1819,7 +1831,13 @@ void responseUART(){
 		case 2:
 			Transmit[0] = 0b10011011;								// Store byte to Transmit.
 			Transmit[1] = 0;
-			Transmit[2] = (abs(kal_velocity)*255*9.5493)/(10);
+			if(direct == 0){
+				send_velocity = -kal_velocity;
+			}
+			else{
+				send_velocity = kal_velocity;
+			}
+			Transmit[2] = (send_velocity*255*9.5493)/(10);
 			// Transmit[2] = ((topOmega*255)/(10))
 			Transmit[3] = checkSum(frameSum(Transmit, 3));			// Let the last byte equal to checksum of 1st-3rd byte.
 			RxState = 3;
@@ -1895,25 +1913,25 @@ uint16_t tranStation(uint8_t num){
 		return 180;
 		break;
 	case 3:
-		return 270;
+		return 330;
 		break;
 	case 4:
 		return 0;
 		break;
 	case 5:
-		return 180;
+		return 5;
 		break;
 	case 6:
-		return 210;
+		return 10;
 		break;
 	case 7:
-		return 250;
+		return 15;
 		break;
 	case 8:
-		return 180;
+		return 20;
 		break;
 	case 9:
-		return 90;
+		return 255;
 		break;
 	case 10:
 		return 0;

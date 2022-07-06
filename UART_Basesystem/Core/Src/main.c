@@ -36,7 +36,7 @@
 /* USER CODE BEGIN PD */
 //Parameter for Adjust
 #define dt 0.01
-#define Q 100000000
+#define Q 10000000
 #define R 500000000
 #define NFW_ADDR (0x23)<<1
 #define NFR_ADDR ((0x23)<<1)+1
@@ -69,6 +69,7 @@ float pos_Kp = 4.07697250571067;
 float pos_Ki = 3.71617437483172;
 float pos_Kd = 0.25445435315971;
 uint8_t setinitial = 1;
+//float offset = 1.59;
 float offset = 1.57;
 /* ---------------------------- < Communications's VARIABLE > ------ */
 
@@ -121,6 +122,7 @@ uint8_t NFwriteFlag = 1;
 uint8_t NFreadFlag = 0;
 
 uint16_t NFtimest = 0;
+uint64_t NFtimeout = 0;
 uint8_t stateI2C = 0;
 
 //spi
@@ -300,7 +302,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-   HAL_Init();
+  HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -345,6 +347,7 @@ int main(void)
   while (1)
   {
 	  static uint64_t timeset = 0;
+	  static uint64_t timeset2 = 0;
 	  static uint64_t timeset3 = 0;
 	  static uint64_t timeStamp = 0;
 	  static GPIO_PinState B1State2[2] = {0};
@@ -352,6 +355,7 @@ int main(void)
 
 	  if(AMTcomplete || micros()-timeStamp>dt*1000){
 	  		 AMT222getpos(&rawPos);
+	  		 //Drivemotor(PIDout);
 	  	  }
 
 	  switch(State){
@@ -359,7 +363,6 @@ int main(void)
 		  case Idle:
 			  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
 			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
-			  ch = 0;
 			  if (micros() - timeset3 > dt*1000000){ //Read Value while Idle
 				  lowpass();
 				  Diff_velo();
@@ -451,7 +454,7 @@ int main(void)
 
 			if(tuaall > tf && setzero == 0){ //End of working should do this condition
 				if(direct == 1){
-					if(deg > Destination[n]-0.1){
+					if(deg > Destination[n]-0.5){
 						finish = 1;
 					}
 				}
@@ -462,36 +465,16 @@ int main(void)
 					}
 				}
 				if(finish == 1){
-					n++;
-					if(n < nDestination){
-						update = 1;}
-					else{
-						update = 0;
-						if(n == nStation || n == nDestination){
-							Reached = 1;
-						}
-						nDestination = 0;
-						n = 0;
-					}
 					State = Laser;
 					NFwriteFlag = 1;
+					NFtimeout = HAL_GetTick();
 				}
 			}
 
 			if(tuaall > 15 && tuaall > tf){ //Condition when moving error
-				n++;
-				if(n < nDestination){
-					update = 1;}
-				else{
-					update = 0;
-					if(n == nStation || n == nDestination){
-						Reached = 1;
-					}
-					nDestination = 0;
-					n = 0;
-				}
 				State = Laser;
 				NFwriteFlag = 1;
+				NFtimeout = HAL_GetTick();
 			}
 
 			if(stop == 1){
@@ -503,6 +486,7 @@ int main(void)
 		  case Emerstop:
 			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
 			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
+			HAL_Delay(100);
 			if(B1State2[1] == GPIO_PIN_SET && B1State2[0] == GPIO_PIN_RESET){
 				reset();
 				nDestination = 0;
@@ -515,42 +499,80 @@ int main(void)
 			break;
 
 		  case Laser:
-			  if(setzero == 1){
-				  State= Idle;
-				  reset();
-				  break;
+			  if (micros() - timeset2 > dt*1000000){ //Read Value while Laser
+				  lowpass();
+				  Diff_velo();
+				  Kalman_filter();
+				  timeset2 = micros();
 			  }
-			  reset();
-			  //State= Idle;
-			  switch(stateI2C){
-			  // Reached state
-			  case 0:
-				  switch(NFenable){
-				  case 1:
-					  NFgetstate();
-					  if( NFwriteFlag && NFstate == 0x78 && (hi2c1.State == HAL_I2C_STATE_READY) ){
-						  NFcontacton();
-						  NFwriteFlag = 0;		// Reached var
-					  }else if(NFstate == 0x12 || NFstate == 0x34 || NFstate == 0x56){
-						  stateI2C = 1;
-						  NFstate = 0;
-					  }
-					  break;
-				  case 0:
-					  NFwriteFlag = 0;
-					  State = Idle;
-					  // state = start;
-					  break;
-				  }
-				  break;
-			  case 1:
-				  NFgetstate();
-				  if(NFstate == 0x78){
-					  stateI2C = 0;
-					  State = Idle;
-				  }
-				  break;
-			  }
+			if(setzero == 1){
+				State = Idle;
+				stateI2C = 0;
+				reset();
+				break;
+			}
+
+			reset();
+
+			// time is not over 5.2sec -> continue laser state.
+			if(HAL_GetTick()-NFtimeout < 5200){
+				switch(stateI2C){
+				case 0:
+					// check the ready of NFfector. Then turn it on.
+					switch(NFenable){
+					case 1:
+						NFgetstate();
+						if( NFwriteFlag && NFstate == 0x78 && (hi2c1.State == HAL_I2C_STATE_READY) ){
+							NFcontacton();
+							NFwriteFlag = 0;		// Reached var.
+						}else if(NFstate == 0x12 || NFstate == 0x34 || NFstate == 0x56){
+							stateI2C = 1;
+							NFstate = 0;			// Reset NF fector state for sure.
+						}
+						break;
+					// Basesystem button was closed.
+					case 0:
+						// do nothing (wait 5.2sec).
+						// when finished wait -> go to else condition below.
+						break;
+					}
+					break;
+				case 1:
+					// Then check that NFfector was closed. -> reset and go to Idle state.
+					NFgetstate();
+					if(NFstate == 0x78){
+						n++;
+						if(n < nDestination){
+							update = 1;
+						}
+						else if(n == nStation || n == nDestination){
+							update = 0;
+							Reached = 1;
+							nDestination = 0;
+							n = 0;
+						}
+						stateI2C = 0;
+						State = Idle;
+					}
+					break;
+				}
+			}
+			// 5.2sec time-out -> go to Idle state.
+			else{
+				n++;
+				if(n < nDestination){
+					update = 1;
+				}
+				else if(n == nStation || n == nDestination){
+					update = 0;
+					Reached = 1;
+					nDestination = 0;
+					n = 0;
+				}
+				stateI2C = 0;
+				State = Idle;
+			}
+			break;
 	  }
 
 	  responseUART();
@@ -732,10 +754,6 @@ static void MX_TIM2_Init(void)
   sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
   if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -852,7 +870,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LD2_Pin|GPIO_PIN_9, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|LD2_Pin|GPIO_PIN_9, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SS_GPIO_Port, SS_Pin, GPIO_PIN_RESET);
@@ -866,8 +884,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD2_Pin PA9 */
-  GPIO_InitStruct.Pin = LD2_Pin|GPIO_PIN_9;
+  /*Configure GPIO pins : PA0 LD2_Pin PA9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|LD2_Pin|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -889,7 +907,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -926,20 +944,56 @@ void CascadeController()
 		}
 	}*/
 	if(start_tra == 2){
-		pos_Kp = 7.07697250571067;
-		pos_Ki = 3.71617437483172;
-		pos_Kd = 2.25445435315971;
-		velo_Kp = 1.5;
-		velo_Ki = 0;
-		velo_Kd = 0;
+		if(postotra > 0.349){
+			pos_Kp = 2.07697250571067;
+			pos_Ki = 1.01617437483172;
+			pos_Kd = 0.2545435315971;
+			velo_Kp = 0.75;
+			velo_Ki = 0;
+			velo_Kd = 0;}
+		else{
+			pos_Kp = 4.07697250571067;
+			pos_Ki = 2.71617437483172;
+			pos_Kd = 1.2545435315971;
+			velo_Kp = 0.5;
+			velo_Ki = 0;
+			velo_Kd = 0;
+		}
 	}
 	else{
-		pos_Kp = 7.07697250571067;
-		pos_Ki = 3.71617437483172;
-		pos_Kd = 2.2545435315971;
-		velo_Kp = 1.5;
-		velo_Ki = 0;
-		velo_Kd = 0;
+		if(postotra > 0.349){
+			pos_Kp = 4.07697250571067;
+			pos_Ki = 2.71617437483172;
+			pos_Kd = 1.2545435315971;
+			velo_Kp = 1.5;
+			velo_Ki = 0;
+			velo_Kd = 0;}
+		else{
+			pos_Kp = 4.07697250571067;
+			pos_Ki = 2.71617437483172;
+			pos_Kd = 1.2545435315971;
+			velo_Kp = 1;
+			velo_Ki = 0;
+			velo_Kd = 0;
+		}
+	}
+
+	if(tuaall > tf-(tb/3)){
+		if(postotra > 0.349){
+			pos_Kp = 7.07697250571067;
+			pos_Ki = 3.71617437483172;
+			pos_Kd = 2.25445435315971;
+			velo_Kp = 2;
+			velo_Ki = 0;
+			velo_Kd = 0;}
+		else{
+			pos_Kp = 4.07697250571067;
+			pos_Ki = 2.71617437483172;
+			pos_Kd = 1.2545435315971;
+			velo_Kp = 1;
+			velo_Ki = 0;
+			velo_Kd = 0;
+		}
 	}
 	//position control******
 	float error2 = tra_pos - current_rad_wrap; //setpoint - new_Data
@@ -1268,9 +1322,8 @@ void equal(float A[][3],float B[][3],int row,int col)
 void Trajectory(float qf,float vb)
 {
 	vb = vb/9.5493;
-	float ab = 0.225;
+	float ab = 0.4;
 	if(qf < 0.1){
-		ab = 0.225;
 		vb = 1.5/9.5493;
 	}
 	if(tuaall >= 0){
@@ -1328,7 +1381,7 @@ void Trajectory(float qf,float vb)
 
 }
 void Drivemotor(int PWM){
-	if(PWM<=0 && PWM>=-10000){
+/*	if(PWM<=0 && PWM>=-10000){
 		PWM = 10000-aaabs(PWM);
 		htim2.Instance->CCR1=aaabs(PWM);
 		htim2.Instance->CCR2=10000;
@@ -1343,6 +1396,23 @@ void Drivemotor(int PWM){
 	}else if(PWM>10000){
 		htim2.Instance->CCR1=10000;
 		htim2.Instance->CCR2=0;
+	}
+}*/
+	if(PWM<=0 && PWM>=-10000){
+		PWM = aaabs(PWM);
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
+		htim2.Instance->CCR2=PWM;
+	}
+	else if(PWM<-10000){
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
+		htim2.Instance->CCR2=10000;
+	}
+	else if(PWM>0 && PWM<=10000){
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);
+		htim2.Instance->CCR2=PWM;
+	}else if(PWM>10000){
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);
+		htim2.Instance->CCR2=10000;
 	}
 }
 
@@ -1391,7 +1461,7 @@ void AMT222getpos(uint16_t *data){
 		    if(setinitial == 0){
 		    current_rad = offset - current_rad;
 		    unwrapping();
-			if(current_rad_wrap-prevPos2 > 0.1 || current_rad_wrap-prevPos2 < -0.1){
+			if(current_rad_wrap-prevPos2 > 0.2 || current_rad_wrap-prevPos2 < -0.2){
 				current_rad_wrap = prevPos2;
 			}
 		    prevPos2 = current_rad_wrap;
@@ -1493,13 +1563,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		static GPIO_PinState B1Check;
 		B1State[0]= HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
 		B1Check = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
-		if(B1State[1] == GPIO_PIN_RESET && B1State[0] == GPIO_PIN_SET){
+		if(B1Check == GPIO_PIN_RESET){
+			ch++;
+		}
+		if(B1State[1] == GPIO_PIN_RESET && B1State[0] == GPIO_PIN_SET && State != Emerstop){
 			stop = 1;
 		}
 		B1State[1] = B1State[0];
-		if(B1Check == GPIO_PIN_SET){
-			ch++;
-		}
 
 	}
 }
@@ -1919,22 +1989,22 @@ uint16_t tranStation(uint8_t num){
 		return 0;
 		break;
 	case 5:
-		return 5;
+		return 180;
 		break;
 	case 6:
-		return 10;
+		return 0;
 		break;
 	case 7:
-		return 15;
+		return 180;
 		break;
 	case 8:
-		return 20;
+		return 5;
 		break;
 	case 9:
-		return 255;
+		return 30;
 		break;
 	case 10:
-		return 0;
+		return 60;
 		break;
 	}
 }
